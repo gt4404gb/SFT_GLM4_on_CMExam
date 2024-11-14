@@ -8,25 +8,28 @@ from dataclasses import dataclass, field
 from peft import TaskType, get_peft_model
 from peft import AdaLoraConfig
 from peft import PeftModel
-from makeDataset import BaichuanQADataset, BaichuanQATestDataset, custom_collate_fn, HuatuoQADataset
+from makeDataset import GLM4QADataset, GLM4QATestDataset, custom_collate_fn, HuatuoQADataset
 from accelerate import Accelerator
 from tqdm import tqdm
 import random
 from peft import prepare_model_for_kbit_training
 
-
+#定义所使用的模型
 @dataclass
 class ModelArguments:
+    #使用本地文件
     model_name_or_path: str = field(default="GLM4-9B", metadata={"help": "Path to the model."})
+    #使用远程文件
+    #model_name_or_path: str = field(default="THUDM/glm-4-9b", metadata={"help": "Path to the model."})
 
-
+#定义数据集的路径（JSON格式）
 @dataclass
 class DataArguments:
     train_data_path: str = field(default="./fzkuji/train.json", metadata={"help": "Path to the training data."})
     val_data_path: str = field(default="./fzkuji/valid.json", metadata={"help": "Path to the validation data."})
     test_data_path: str = field(default="./fzkuji/test.json", metadata={"help": "Path to the test data."})
 
-
+#定义部分训练参数
 @dataclass
 class CustomTrainingArguments(TrainingArguments):
     output_dir: str = field(default="./model",
@@ -124,8 +127,6 @@ def train(model_args, data_args, training_args, accelerator, pretrained_model=No
         peft_config = AdaLoraConfig(
             init_r=128,
             lora_alpha=256,
-            # target_modules=["q_proj", "k_proj", "v_proj", "o_proj", "W_pack"],
-            # target_modules=['down_proj', 'gate_proj', 'up_proj', 'W_pack', 'o_proj'],
             target_modules=["query_key_value", "dense", "dense_h_to_4h", "dense_4h_to_h"],  # 现存问题只微调部分演示即可
             lora_dropout=0.1,
             bias="none",
@@ -138,8 +139,8 @@ def train(model_args, data_args, training_args, accelerator, pretrained_model=No
     model.print_trainable_parameters()
 
     # 创建数据集和加载器
-    full_train_dataset = BaichuanQADataset(data_args.train_data_path, tokenizer, training_args.model_max_length,
-                                           training_args.char_limit)
+    full_train_dataset = GLM4QADataset(data_args.train_data_path, tokenizer, training_args.model_max_length,
+                                       training_args.char_limit)
 
     # 随机选择 1% 的训练数据
     train_size = int(0.1 * len(full_train_dataset))
@@ -147,7 +148,7 @@ def train(model_args, data_args, training_args, accelerator, pretrained_model=No
     train_dataset = Subset(full_train_dataset, train_indices)
 
     # 加载验证集
-    full_val_dataset = BaichuanQATestDataset(data_args.val_data_path, tokenizer, training_args.model_max_length)
+    full_val_dataset = GLM4QATestDataset(data_args.val_data_path, tokenizer, training_args.model_max_length)
 
     # 随机选择 1% 的验证数据
     val_size = int(1 * len(full_val_dataset))
@@ -175,7 +176,6 @@ def train(model_args, data_args, training_args, accelerator, pretrained_model=No
     for epoch in range(training_args.num_train_epochs):
         torch.cuda.empty_cache()  # 清理显存缓存
         model.train()
-        # tokenizer.padding_side = "right" #设置回右填充
         epoch_loss = 0
         with tqdm(train_dataloader, unit="batch") as tepoch:
             for step, batch in enumerate(tepoch):
@@ -196,13 +196,9 @@ def train(model_args, data_args, training_args, accelerator, pretrained_model=No
 
         # 验证循环
         torch.cuda.empty_cache()  # 清理显存缓存
-        # validate(model, tokenizer, val_dataloader, training_args, epoch, accelerator)
+        validate(model, tokenizer, val_dataloader, training_args, epoch, accelerator)
 
     # 保存模型
-    # accelerator.wait_for_everyone()
-    # unwrapped_model = accelerator.unwrap_model(model)
-    # unwrapped_model.save_pretrained(training_args.output_dir, save_function=accelerator.save)
-    # tokenizer.save_pretrained(training_args.output_dir)
     accelerator.wait_for_everyone()
     model.save_pretrained(training_args.output_dir, save_function=accelerator.save, safe_serialization=True)
     tokenizer.save_pretrained(training_args.output_dir)
@@ -211,7 +207,6 @@ def train(model_args, data_args, training_args, accelerator, pretrained_model=No
 
 def validate(model, tokenizer, val_dataloader, training_args, epoch, accelerator):
     model.eval()
-    # tokenizer.padding_side = "left"  # 设置填充在左侧
     val_predictions = []
     val_labels = []
     with tqdm(val_dataloader, unit="batch") as vepoch:
@@ -239,7 +234,6 @@ def validate(model, tokenizer, val_dataloader, training_args, epoch, accelerator
 def test(model_args, data_args, training_args, accelerator):
     # 加载模型和分词器
     tokenizer = AutoTokenizer.from_pretrained(model_args.model_name_or_path, use_fast=False, trust_remote_code=True)
-    # tokenizer.padding_side = "left"  # 设置填充在左侧
     # 使用 PeftModel.from_pretrained 来加载微调模型
     base_model = AutoModelForCausalLM.from_pretrained(
         model_args.model_name_or_path,
@@ -248,21 +242,13 @@ def test(model_args, data_args, training_args, accelerator):
     )
     # print(base_model)
     model = PeftModel.from_pretrained(base_model, training_args.output_dir)  # 使用 PEFT 加载微调后的模型
-    # state_dict = load_file("model/adapter_model.safetensors")
-    # model.load_state_dict(state_dict, strict=False)
     print("Model parameters after loading:")
     print(model)
 
     model = accelerator.prepare(base_model)
 
     # 加载测试集
-    test_dataset = BaichuanQATestDataset(data_args.test_data_path, tokenizer, training_args.model_max_length)
-
-    # 随机选择 1% 的测试数据
-    # test_size = int(1 * len(test_dataset))
-    # test_indices = random.sample(range(len(test_dataset)), test_size)
-    # test_dataset = Subset(test_dataset, test_indices)
-
+    test_dataset = GLM4QATestDataset(data_args.test_data_path, tokenizer, training_args.model_max_length)
     test_dataloader = DataLoader(test_dataset, batch_size=training_args.per_device_test_batch_size, shuffle=False,
                                  collate_fn=custom_collate_fn)  # 使用自定义的 collate_fn
 

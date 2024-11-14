@@ -1,67 +1,11 @@
-from torch.utils.data import Dataset, DataLoader, RandomSampler, SequentialSampler
+from torch.utils.data import Dataset, DataLoader, Subset
 import torch
 import json
+from transformers import AutoTokenizer
+import random
+from tqdm import tqdm
 
-
-class QADataSet(Dataset):
-
-    def __init__(self, json_path: str, tokenizer, max_length=256):
-        self.tokenizer = tokenizer
-        self.max_length = max_length
-        self.question_data = []
-        self.answer_explanation_data = []
-        with open(json_path, "r", encoding='utf-8') as f:
-            for line in f:
-                if not line or line == "":
-                    continue
-                json_line = json.loads(line)
-                question = json_line["Question"]
-                correct_option = next(
-                    (option["value"] for option in json_line["Options"] if option["key"] == json_line["Answer"]), "")
-                explanation = json_line["Explanation"]
-                answer_explanation = f"{correct_option}。{explanation}"
-                self.question_data.append(question)
-                self.answer_explanation_data.append(answer_explanation)
-        print("Data load complete, size:", len(self.question_data))
-
-    def __len__(self):
-        return len(self.question_data)
-
-    def __getitem__(self, index):
-        source_text = str(self.question_data[index])
-        target_text = str(self.answer_explanation_data[index])
-
-        source = self.tokenizer.batch_encode_plus(
-            [source_text],
-            max_length=self.max_length,
-            pad_to_max_length=True,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
-        )
-        target = self.tokenizer.batch_encode_plus(
-            [target_text],
-            max_length=self.max_length,
-            pad_to_max_length=True,
-            truncation=True,
-            padding="max_length",
-            return_tensors="pt",
-        )
-
-        source_ids = source["input_ids"].squeeze()
-        source_mask = source["attention_mask"].squeeze()
-        target_ids = target["input_ids"].squeeze()
-        target_mask = target["attention_mask"].squeeze()
-
-        return {
-            "source_ids": source_ids.to(dtype=torch.long),
-            "source_mask": source_mask.to(dtype=torch.long),
-            "target_ids": target_ids.to(dtype=torch.long),
-            "target_mask": target_mask.to(dtype=torch.long)
-        }
-
-
-class BaichuanQADataset(Dataset):
+class GLM4QADataset(Dataset):
     def __init__(self, json_path: str, tokenizer, max_length=256, char_limit=300):
         self.tokenizer = tokenizer
         self.max_length = max_length
@@ -122,7 +66,7 @@ def custom_collate_fn(batch):
     }
 
 
-class BaichuanQATestDataset(Dataset):
+class GLM4QATestDataset(Dataset):
     def __init__(self, json_path: str, tokenizer, max_length=256):
         self.tokenizer = tokenizer
         self.max_length = max_length
@@ -223,10 +167,10 @@ class HuatuoQADataset(Dataset):
 
 if __name__ == "__main__":
     #测试数据分类有效性
-    tokenizer = AutoTokenizer.from_pretrained("Baichuan2-7B-Base", use_fast=False, trust_remote_code=True, add_eos_token=True)
-    tokenizer.padding_side = "left"  # 设置填充在左侧
+    tokenizer = AutoTokenizer.from_pretrained("GLM4-9B", use_fast=False, trust_remote_code=True)
+    #tokenizer.padding_side = "left"  # 设置填充在左侧
     # 加载测试集
-    test_dataset = BaichuanQATestDataset("fzkuji/test.json", tokenizer, 256)
+    test_dataset = GLM4QATestDataset("fzkuji/test.json", tokenizer, 256)
 
     # 随机选择 1% 的测试数据
     test_size = int(1 * len(test_dataset))

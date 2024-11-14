@@ -4,8 +4,8 @@ from nltk.translate.bleu_score import sentence_bleu, SmoothingFunction
 from rouge_score import rouge_scorer
 
 # 加载测试集和生成数据集的CSV文件
-test_data = pd.read_csv('CMExam-main/data/test_with_annotations.csv')  # 替换为实际测试集文件路径
-generated_data = pd.read_csv('最佳结果.csv')  # 替换为实际生成数据集文件路径
+test_data = pd.read_csv('fzkuji/test_with_annotations.csv')  # 替换为实际测试集文件路径
+generated_data = pd.read_csv('test_predictions.csv')  # 替换为实际生成数据集文件路径
 
 
 # 定义函数，将 Options 列转换为与 Generated Text 一致的格式，并去除每个选项文本后的多余空格
